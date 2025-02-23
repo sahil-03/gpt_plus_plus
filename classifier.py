@@ -53,10 +53,8 @@ class GPT2SentimentClassifier(torch.nn.Module):
       elif config.fine_tune_mode == 'full-model':
         param.requires_grad = True
 
-    self.hidden_size = self.gpt.config.n_embd
-    self.dropout = torch.nn.Dropout(0.1)
-    self.classifier = torch.nn.Linear(self.hidden_size, self.num_labels)
-
+    self.dropout = torch.nn.Dropout(config.hidden_dropout_prob)
+    self.classifier = torch.nn.Linear(config.hidden_size, config.num_labels)
 
   def forward(self, input_ids, attention_mask):
     outputs = self.gpt(input_ids, attention_mask=attention_mask)
@@ -67,8 +65,6 @@ class GPT2SentimentClassifier(torch.nn.Module):
     
     logits = self.classifier(sentence_repr)
     return logits 
-
-
 
 class SentimentDataset(Dataset):
   def __init__(self, dataset, args):
