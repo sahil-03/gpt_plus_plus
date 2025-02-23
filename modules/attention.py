@@ -36,9 +36,9 @@ class CausalSelfAttention(nn.Module):
     attn_scores = torch.matmul(query, key.transpose(-1, -2)) / (self.attention_head_size ** 0.5)
     attn_scores = attn_scores + attention_mask
     # also add a causal mask to the attention scores
-    causal_mask = torch.triu(torch.ones(attn_scores.size(-1), attn_scores.size(-1)), diagonal=1) * -float('inf')
+    causal_mask = torch.triu(torch.ones(attn_scores.size(-1), attn_scores.size(-1)), diagonal=1)
     causal_mask = causal_mask[None, None, :, :].to(attn_scores.device)
-    attn_scores = attn_scores + causal_mask
+    attn_scores = attn_scores.masked_fill(causal_mask == 1, float('-inf'))
     # softmax per element in the sequence
     attn_probs = torch.nn.functional.softmax(attn_scores, dim=-1)
     # Apply dropout to the attention probabilities.
