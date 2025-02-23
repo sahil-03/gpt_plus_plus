@@ -32,9 +32,20 @@ class CausalSelfAttention(nn.Module):
     return proj
 
   def attention(self, key, query, value, attention_mask):
-
+    # QK^T / sqrt(d_k)
+    attn_scores = torch.matmul(query, key.transpose(-1, -2)) / torch.sqrt(self.attention_head_size)
+    attn_scores = attn_scores + attention_mask
+    # also add a causal mask to the attention scores
+    causal_mask = torch.triu(torch.ones(attn_scores.size(-1), attn_scores.size(-1)), diagonal=1) * -torch.inf
+    attn_scores = attn_scores + causal_mask
+    # softmax per element in the sequence
+    attn_probs = torch.nn.functional.softmax(attn_scores, dim=-1)
+    # Apply dropout to the attention probabilities.
+    attn_probs = self.dropout(attn_probs)
+    # apply the attention probabilities to the values
+    attn_value = torch.matmul(attn_probs, value)
+    return attn_value
     ### YOUR CODE HERE
-    raise NotImplementedError
 
 
   def forward(self, hidden_states, attention_mask):
