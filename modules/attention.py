@@ -36,7 +36,8 @@ class CausalSelfAttention(nn.Module):
     attn_scores = torch.matmul(query, key.transpose(-1, -2)) / torch.sqrt(self.attention_head_size)
     attn_scores = attn_scores + attention_mask
     # also add a causal mask to the attention scores
-    causal_mask = torch.triu(torch.ones(attn_scores.size(-1), attn_scores.size(-1)), diagonal=1) * -torch.inf
+    causal_mask = torch.triu(torch.ones(attn_scores.size(-1), attn_scores.size(-1)), diagonal=1) * -float('inf')
+    causal_mask = causal_mask[None, None, :, :].to(attn_scores.device)
     attn_scores = attn_scores + causal_mask
     # softmax per element in the sequence
     attn_probs = torch.nn.functional.softmax(attn_scores, dim=-1)
