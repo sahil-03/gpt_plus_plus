@@ -30,9 +30,9 @@ class GPT2Layer(nn.Module):
         IN THIS FUNCTION.
     """
     ### YOUR CODE HERE
-    concat = input + output
-    dense = dense_layer(concat)
-    return dropout(dense)
+    dense_output = dense_layer(output)
+    dropout_output = dropout(dense_output)
+    return input + dropout_output
 
   def forward(self, hidden_states, attention_mask):
     """

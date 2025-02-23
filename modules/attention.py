@@ -33,7 +33,7 @@ class CausalSelfAttention(nn.Module):
 
   def attention(self, key, query, value, attention_mask):
     # QK^T / sqrt(d_k)
-    attn_scores = torch.matmul(query, key.transpose(-1, -2)) / torch.sqrt(self.attention_head_size)
+    attn_scores = torch.matmul(query, key.transpose(-1, -2)) / (self.attention_head_size ** 0.5)
     attn_scores = attn_scores + attention_mask
     # also add a causal mask to the attention scores
     causal_mask = torch.triu(torch.ones(attn_scores.size(-1), attn_scores.size(-1)), diagonal=1) * -float('inf')
@@ -45,6 +45,8 @@ class CausalSelfAttention(nn.Module):
     attn_probs = self.dropout(attn_probs)
     # apply the attention probabilities to the values
     attn_value = torch.matmul(attn_probs, value)
+    attn_value = rearrange(attn_value, 'b h t d -> b t h d')
+    attn_value = rearrange(attn_value, 'b t h d -> b t (h d)')
     return attn_value
     ### YOUR CODE HERE
 
