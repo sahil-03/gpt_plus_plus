@@ -58,6 +58,7 @@ class GPT2SentimentClassifier(torch.nn.Module):
 
   def forward(self, input_ids, attention_mask):
     outputs = self.gpt(input_ids, attention_mask=attention_mask)
+    # TODO: I don't think the following is right (gives error on training)
     hidden_states = outputs[0] 
 
     sentence_repr = hidden_states[:, -1, :]
