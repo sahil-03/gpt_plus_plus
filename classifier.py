@@ -57,14 +57,9 @@ class GPT2SentimentClassifier(torch.nn.Module):
     self.classifier = torch.nn.Linear(config.hidden_size, config.num_labels)
 
   def forward(self, input_ids, attention_mask):
-    outputs = self.gpt(input_ids, attention_mask=attention_mask)
-    # TODO: I don't think the following is right (gives error on training)
-    hidden_states = outputs[0] 
-
-    sentence_repr = hidden_states[:, -1, :]
-    sentence_repr = self.dropout(sentence_repr)
-    
-    logits = self.classifier(sentence_repr)
+    outputs = self.gpt(input_ids, attention_mask=attention_mask)['last_token']
+    dropout_vals = self.dropout(outputs)
+    logits = self.classifier(dropout_vals)
     return logits 
 
 class SentimentDataset(Dataset):

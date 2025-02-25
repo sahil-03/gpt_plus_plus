@@ -105,6 +105,9 @@ class GPT2Model(GPTPreTrainedModel):
       return hidden_state(s) * E^T
     """
     ### YOUR CODE HERE
+
+    # Comment: this doesn't seem needed??
+    hidden_state()
     raise NotImplementedError
 
 

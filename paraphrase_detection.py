@@ -52,7 +52,7 @@ class ParaphraseGPT(nn.Module):
     super().__init__()
     self.gpt = GPT2Model.from_pretrained(model=args.model_size, d=args.d, l=args.l, num_heads=args.num_heads)
     self.paraphrase_detection_head = nn.Linear(args.d, 2)  # Paraphrase detection has two outputs: 1 (yes) or 0 (no).
-
+    print("ARGS.D", args.d)
     # By default, fine-tune the full model.
     for param in self.gpt.parameters():
       param.requires_grad = True
@@ -72,7 +72,34 @@ class ParaphraseGPT(nn.Module):
 
     'Takes a batch of sentences and produces embeddings for them.'
     ### YOUR CODE HERE
-    raise NotImplementedError
+
+    # outputs = self.gpt(input_ids, attention_mask=attention_mask)
+    # last_token_embeddings = outputs['last_hidden_state'][:, -1, :]
+    
+    # # Pass the last token embedding through the paraphrase detection head
+    # logits = self.paraphrase_detection_head(last_token_embeddings)
+    
+    # return logits
+
+    outputs = self.gpt(input_ids, attention_mask=attention_mask)['last_token']
+
+    yes_no = self.paraphrase_detection_head(outputs)
+    # no_val, yes_val = yes_no
+    # GPT2Model.hidden_state_to_token(yes_no)
+    yes_plural = yes_no[:, 1]
+    nos_plural = yes_no[:, 0]
+
+    mask = yes_plural > nos_plural
+    batch_size, _ = yes_no.size()
+
+    return_token = torch.empty((batch_size, 8505 + 1), dtype=torch.float)
+
+    return_token.fill_(float('-inf'))
+    return_token[:, 3919] = yes_no[:, 0]
+    return_token[:, 8505] = yes_no[:, 1]
+
+    return_token = return_token.to(torch.device('cuda'))
+    return return_token
 
 
 
