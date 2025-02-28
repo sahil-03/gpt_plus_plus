@@ -74,20 +74,11 @@ class SonnetGPT(nn.Module):
     not just the last token! This will allow our model to learn the natural language distribution that composes sonnets,
     not just the distribution over next tokens for the last token!
     """
-    # Get the outputs from the base GPT-2 model
     outputs = self.gpt(input_ids, attention_mask)
-    hidden_states = outputs['last_hidden_state']  # Shape: [batch_size, seq_len, hidden_size]
-    
-    # Apply the sonnet adapter to enhance task-specific features
+    hidden_states = outputs['last_hidden_state'] 
     adapted_states = self.adapter_activation(self.sonnet_adapter(hidden_states))
-    
-    # Add residual connection
     hidden_states = hidden_states + adapted_states
-    
-    # Project to vocabulary space using weight tying with the input embeddings
-    # This is a common technique in language models to reduce parameters
     logits = torch.matmul(hidden_states, self.gpt.word_embedding.weight.transpose(0, 1))
-    
     return logits
 
   def get_device(self):
