@@ -50,9 +50,23 @@ class SonnetGPT(nn.Module):
     self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     self.tokenizer.pad_token = self.tokenizer.eos_token
 
-    # By default, fine-tune the full model. TODO: this is maybe not idea.
+    # Freeze the base model parameters to preserve pre-trained knowledge
     for param in self.gpt.parameters():
+      param.requires_grad = False
+      
+    # 1. The final layer norm - important for output distribution
+    for param in self.gpt.final_layer_norm.parameters():
       param.requires_grad = True
+      
+    # 2. The last few transformer layers - these capture higher-level features
+    num_layers_to_finetune = min(4, len(self.gpt.gpt_layers))  # Fine-tune at most 4 layers
+    for i in range(len(self.gpt.gpt_layers) - num_layers_to_finetune, len(self.gpt.gpt_layers)):
+      for param in self.gpt.gpt_layers[i].parameters():
+        param.requires_grad = True
+        
+    # 3. Task-specific adapter layer for sonnet generation
+    self.sonnet_adapter = nn.Linear(args.d, args.d)
+    self.adapter_activation = nn.GELU()
 
   def forward(self, input_ids, attention_mask):
     """
@@ -60,9 +74,21 @@ class SonnetGPT(nn.Module):
     not just the last token! This will allow our model to learn the natural language distribution that composes sonnets,
     not just the distribution over next tokens for the last token!
     """
-    ### YOUR CODE HERE
-    raise NotImplementedError
-
+    # Get the outputs from the base GPT-2 model
+    outputs = self.gpt(input_ids, attention_mask)
+    hidden_states = outputs['last_hidden_state']  # Shape: [batch_size, seq_len, hidden_size]
+    
+    # Apply the sonnet adapter to enhance task-specific features
+    adapted_states = self.adapter_activation(self.sonnet_adapter(hidden_states))
+    
+    # Add residual connection
+    hidden_states = hidden_states + adapted_states
+    
+    # Project to vocabulary space using weight tying with the input embeddings
+    # This is a common technique in language models to reduce parameters
+    logits = torch.matmul(hidden_states, self.gpt.word_embedding.weight.transpose(0, 1))
+    
+    return logits
 
   def get_device(self):
     for param in self.gpt.parameters():
@@ -79,7 +105,12 @@ class SonnetGPT(nn.Module):
     """
     token_ids = encoding.to(self.get_device())
     attention_mask = torch.ones(token_ids.shape, dtype=torch.int64).to(self.get_device())
-
+    
+    line_count = 0
+    max_lines = 14  # Shakesperean sonnets have max of 14 lines
+    newline_token_id = self.tokenizer.encode('\n', add_special_tokens=False)[0]
+    
+    top_k = 50  
 
     for _ in range(max_length):
       # Forward pass to get logits
@@ -88,20 +119,38 @@ class SonnetGPT(nn.Module):
 
       # Convert logits to probabilities
       probs = torch.nn.functional.softmax(logits_last_token, dim=-1)
-
-      # Top-p (nucleus) sampling
-      sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+      
+      # Top-k filtering
+      top_k_probs, top_k_indices = torch.topk(probs, top_k)
+      
+      # Top-p (nucleus) sampling on the reduced top-k set
+      sorted_probs, sorted_indices = torch.sort(top_k_probs, descending=True)
       cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+      
+      # Create top-p mask
       top_p_mask = cumulative_probs <= top_p
-      top_p_mask[..., 1:] = top_p_mask[..., :-1].clone()  # Shift mask right for proper thresholding
-      top_p_mask[..., 0] = True  # Always include the highest probability token
-      filtered_probs = sorted_probs * top_p_mask  # Zero out unlikely tokens
-      filtered_probs /= filtered_probs.sum(dim=-1, keepdim=True)  # Normalize probabilities
-
+      top_p_mask[..., 1:] = top_p_mask[..., :-1].clone()  
+      top_p_mask[..., 0] = True 
+      
+      # Apply the mask
+      filtered_probs = sorted_probs * top_p_mask
+      filtered_probs /= filtered_probs.sum(dim=-1, keepdim=True)
+      
+      # Map back to original indices
+      filtered_indices = top_k_indices.gather(-1, sorted_indices)
+      
       # Sample from filtered distribution
       sampled_index = torch.multinomial(filtered_probs, 1)
-      sampled_token = sorted_indices.gather(dim=-1, index=sampled_index)
-
+      sampled_token = filtered_indices.gather(dim=-1, index=sampled_index)
+      
+      # Check for line endings to enforce sonnet structure
+      if sampled_token.item() == newline_token_id:
+        line_count += 1
+        
+        # If we've reached the desired number of lines, end generation
+        if line_count >= max_lines:
+          break
+      
       # Stop if end-of-sequence token is reached
       if sampled_token.item() == self.tokenizer.eos_token_id:
         break
@@ -147,6 +196,21 @@ def train(args):
 
   lr = args.lr
   optimizer = AdamW(model.parameters(), lr=lr)
+  
+  # Early stopping parameters
+  patience = 3 
+  best_loss = float('inf')
+  patience_counter = 0
+  
+  # Validation split for early stopping
+  train_size = int(0.9 * len(sonnet_dataset))
+  val_size = len(sonnet_dataset) - train_size
+  train_subset, val_subset = torch.utils.data.random_split(sonnet_dataset, [train_size, val_size])
+  
+  train_dataloader = DataLoader(train_subset, shuffle=True, batch_size=args.batch_size,
+                               collate_fn=sonnet_dataset.collate_fn)
+  val_dataloader = DataLoader(val_subset, shuffle=False, batch_size=args.batch_size,
+                             collate_fn=sonnet_dataset.collate_fn)
 
   # Run for the specified number of epochs.
   for epoch in range(args.epochs):
@@ -154,7 +218,7 @@ def train(args):
     train_loss = 0
     num_batches = 0
 
-    for batch in tqdm(sonnet_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
+    for batch in tqdm(train_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
       # Get the input and move it to the gpu (I do not recommend training this model on CPU).
       b_ids, b_mask = batch['token_ids'], batch['attention_mask']
       b_ids = b_ids.to(device)
@@ -173,7 +237,42 @@ def train(args):
       num_batches += 1
 
     train_loss = train_loss / num_batches
-    print(f"Epoch {epoch}: train loss :: {train_loss :.3f}.")
+    
+    # Evaluate on validation set
+    model.eval()
+    val_loss = 0
+    val_batches = 0
+    
+    with torch.no_grad():
+      for batch in tqdm(val_dataloader, desc=f'val-{epoch}', disable=TQDM_DISABLE):
+        b_ids, b_mask = batch['token_ids'], batch['attention_mask']
+        b_ids = b_ids.to(device)
+        b_mask = b_mask.to(device)
+        
+        logits = model(b_ids, b_mask)
+        logits = rearrange(logits[:, :-1].contiguous(), 'b t d -> (b t) d')
+        labels = b_ids[:, 1:].contiguous().flatten()
+        loss = F.cross_entropy(logits, labels, reduction='mean')
+        
+        val_loss += loss.item()
+        val_batches += 1
+    
+    val_loss = val_loss / val_batches
+    
+    print(f"Epoch {epoch}: train loss :: {train_loss :.3f}, val loss :: {val_loss :.3f}")
+    
+    # Check for early stopping
+    if val_loss < best_loss:
+      best_loss = val_loss
+      patience_counter = 0
+      # Save the best model
+      save_model(model, optimizer, args, f'best_{args.filepath}')
+    else:
+      patience_counter += 1
+      if patience_counter >= patience:
+        print(f"Early stopping triggered after {epoch + 1} epochs")
+        break
+    
     print('Generating several output sonnets...')
     model.eval()
     for batch in held_out_sonnet_dataset:
@@ -181,7 +280,6 @@ def train(args):
       output = model.generate(encoding['input_ids'], temperature=args.temperature, top_p=args.top_p)
       print(f'{batch[1]}{output[1]}\n\n')
 
-    # TODO: consider a stopping condition to prevent overfitting on the small dataset of sonnets.
     save_model(model, optimizer, args, f'{epoch}_{args.filepath}')
 
 
