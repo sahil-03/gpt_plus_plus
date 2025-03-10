@@ -26,6 +26,14 @@ class PretrainedConfig(object):
       "tie_word_embeddings", True
     )  # Whether input and output word embeddings should be tied for all MLM, LM and Seq2Seq models.
 
+    # Optimizer configuration
+    self.optimizer = kwargs.pop("optimizer", "adam")
+    self.beta1 = kwargs.pop("beta1", 0.9)
+    self.beta2 = kwargs.pop("beta2", 0.999)
+    self.eps = kwargs.pop("eps", 1e-8)
+    self.max_precond = kwargs.pop("max_precond", 1e4)
+    self.precond_beta = kwargs.pop("precond_beta", 0.9)
+
     # Is decoder is used in encoder-decoder models to differentiate encoder from decoder
     self.is_encoder_decoder = kwargs.pop("is_encoder_decoder", False)
     self.is_decoder = kwargs.pop("is_decoder", False)

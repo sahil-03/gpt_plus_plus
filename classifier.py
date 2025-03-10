@@ -15,7 +15,7 @@ from transformers import GPT2Tokenizer
 from sklearn.metrics import f1_score, accuracy_score
 
 from models.gpt2 import GPT2Model
-from optimizer import AdamW
+from optimizer import AdamW, DiagonalPreconditioner, PreconditionedAdam
 from tqdm import tqdm
 
 TQDM_DISABLE = False
@@ -233,6 +233,30 @@ def save_model(model, optimizer, args, config, filepath):
   print(f"save the model to {filepath}")
 
 
+def get_optimizer(model, config):
+    """Get the appropriate optimizer based on config."""
+    if config.optimizer == 'adam':
+        return AdamW(model.parameters(), lr=config.lr)
+    elif config.optimizer == 'preconditioner':
+        return DiagonalPreconditioner(
+            model.parameters(),
+            lr=config.lr,
+            beta=config.beta1,
+            eps=config.eps,
+            max_precond=config.max_precond
+        )
+    elif config.optimizer == 'preconditioned_adam':
+        return PreconditionedAdam(
+            model.parameters(),
+            lr=config.lr,
+            betas=(config.beta1, config.beta2),
+            eps=config.eps,
+            precond_beta=config.precond_beta,
+            max_precond=config.max_precond
+        )
+    else:
+        raise ValueError(f"Unknown optimizer: {config.optimizer}")
+
 def train(args):
   device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
   # Create the data and its corresponding datasets and dataloader.
@@ -252,15 +276,16 @@ def train(args):
             'num_labels': num_labels,
             'hidden_size': 768,
             'data_dir': '.',
-            'fine_tune_mode': args.fine_tune_mode}
+            'fine_tune_mode': args.fine_tune_mode,
+            'lr': args.lr,
+            'optimizer': args.optimizer}
 
   config = SimpleNamespace(**config)
 
   model = GPT2SentimentClassifier(config)
   model = model.to(device)
 
-  lr = args.lr
-  optimizer = AdamW(model.parameters(), lr=lr)
+  optimizer = get_optimizer(model, config)
   best_dev_acc = 0
 
   # Run for the specified number of epochs.
@@ -340,15 +365,17 @@ def get_args():
   parser = argparse.ArgumentParser()
   parser.add_argument("--seed", type=int, default=11711)
   parser.add_argument("--epochs", type=int, default=10)
+  parser.add_argument("--optimizer", type=str, default="adam",
+                    choices=['adam', 'preconditioner', 'preconditioned_adam'],
+                    help='Optimizer to use for training')
   parser.add_argument("--fine-tune-mode", type=str,
-                      help='last-linear-layer: the GPT parameters are frozen and the task specific head parameters are updated; full-model: GPT parameters are updated as well',
-                      choices=('last-linear-layer', 'full-model'), default="last-linear-layer")
+                    help='last-linear-layer: the GPT parameters are frozen and the task specific head parameters are updated; full-model: GPT parameters are updated as well',
+                    choices=('last-linear-layer', 'full-model'), default="last-linear-layer")
   parser.add_argument("--use_gpu", action='store_true')
-
   parser.add_argument("--batch_size", help='sst: 64, cfimdb: 8 can fit a 12GB GPU', type=int, default=8)
   parser.add_argument("--hidden_dropout_prob", type=float, default=0.3)
   parser.add_argument("--lr", type=float, help="learning rate, default lr for 'pretrain': 1e-3, 'finetune': 1e-5",
-                      default=1e-3)
+                    default=1e-3)
 
   args = parser.parse_args()
   return args
