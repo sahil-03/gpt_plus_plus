@@ -366,16 +366,16 @@ def get_args():
   parser.add_argument("--seed", type=int, default=11711)
   parser.add_argument("--epochs", type=int, default=10)
   parser.add_argument("--optimizer", type=str, default="adam",
-                    choices=['adam', 'preconditioner', 'preconditioned_adam'],
-                    help='Optimizer to use for training')
+                      choices=['adam', 'preconditioner', 'preconditioned_adam'],
+                      help='Optimizer to use for training')
   parser.add_argument("--fine-tune-mode", type=str,
-                    help='last-linear-layer: the GPT parameters are frozen and the task specific head parameters are updated; full-model: GPT parameters are updated as well',
-                    choices=('last-linear-layer', 'full-model'), default="last-linear-layer")
+                      help='last-linear-layer: the GPT parameters are frozen and the task specific head parameters are updated; full-model: GPT parameters are updated as well',
+                      choices=('last-linear-layer', 'full-model'), default="last-linear-layer")
   parser.add_argument("--use_gpu", action='store_true')
   parser.add_argument("--batch_size", help='sst: 64, cfimdb: 8 can fit a 12GB GPU', type=int, default=8)
   parser.add_argument("--hidden_dropout_prob", type=float, default=0.3)
   parser.add_argument("--lr", type=float, help="learning rate, default lr for 'pretrain': 1e-3, 'finetune': 1e-5",
-                    default=1e-3)
+                      default=1e-3)
 
   args = parser.parse_args()
   return args
