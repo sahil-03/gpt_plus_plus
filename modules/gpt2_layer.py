@@ -9,9 +9,10 @@ class GPT2Layer(nn.Module):
   def __init__(self, config):
     super().__init__()
     # Multi-head attention.
-    # self.self_attention = CausalSelfAttention(config)
-    self.self_attention = FlashAttention(config)
-
+    if not config.use_flash_attn:
+      self.self_attention = CausalSelfAttention(config)
+    else:
+      self.self_attention = FlashAttention(config)
 
     # Add-norm for multi-head attention.
     self.attention_dense = nn.Linear(config.hidden_size, config.hidden_size)

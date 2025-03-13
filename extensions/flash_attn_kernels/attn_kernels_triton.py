@@ -18,51 +18,29 @@ def causal_flash_attn_fwd_inner(
     offs_q: tl.constexpr,
     offs_kv: tl.constexpr,
     is_causal: tl.constexpr,
-    attn_mask_ptr=None,
 ):
     K_block = tl.load(K_block_ptr)
-    QK_block = tl.dot(Q_block, K_block)
+    
+    Q_block_f16 = Q_block.to(tl.float16)
+    K_block_f16 = K_block.to(tl.float16)
+    
+    QK_block = tl.dot(Q_block_f16, K_block_f16)
 
     if is_causal:
-        # Apply causal mask
-        causal_mask = offs_q[:, None] >= (start_kv + offs_kv[None, :])
-        
-        # Apply softmax scaling and causal masking
-        QK_block = QK_block * softmax_scale
-        
-        # If attention mask is provided, apply it in addition to causal mask
-        if attn_mask_ptr is not None:
-            # Load the attention mask for the current block
-            attn_mask_block = tl.load(attn_mask_ptr)
-            # Combine causal mask with attention mask (both must allow attention)
-            combined_mask = causal_mask & (attn_mask_block > 0)
-            QK_block = QK_block + tl.where(combined_mask, 0, -1.0e6)
-        else:
-            # Only apply causal mask
-            QK_block = QK_block + tl.where(causal_mask, 0, -1.0e6)
-            
+        mask = offs_q[:, None] >= (start_kv + offs_kv[None, :])
+        QK_block = QK_block * softmax_scale + tl.where(mask, 0, -1.0e6)
         m_ij = tl.maximum(m_i, tl.max(QK_block, 1))
         QK_block -= m_ij[:, None]
     else:
-        # Non-causal case (blocks to the left of diagonal)
-        QK_block = QK_block * softmax_scale
-        
-        # If attention mask is provided, apply it
-        if attn_mask_ptr is not None:
-            # Load the attention mask for the current block
-            attn_mask_block = tl.load(attn_mask_ptr)
-            # Apply attention mask
-            QK_block = QK_block + tl.where(attn_mask_block > 0, 0, -1.0e6)
-            
-        m_ij = tl.maximum(m_i, tl.max(QK_block, 1))
-        QK_block -= m_ij[:, None]
+        m_ij = tl.maximum(m_i, tl.max(QK_block, 1) * softmax_scale)
+        QK_block = QK_block * softmax_scale - m_ij[:, None]
 
     P_block = tl.math.exp(QK_block)
     l_ij = tl.sum(P_block, 1)
     alpha = tl.math.exp(m_i - m_ij)
     l_i = l_i * alpha + l_ij
 
-    V_block = tl.load(V_block_ptr)
+    V_block = tl.load(V_block_ptr).to(tl.float16)
     P_block = P_block.to(tl.float16)
     O_block = O_block * alpha[:, None]
     O_block = tl.dot(P_block, V_block, O_block)
@@ -113,7 +91,6 @@ def causal_flash_attn_fwd(
     HEAD_DIM: tl.constexpr,
     BLOCK_SIZE_Q: tl.constexpr,
     BLOCK_SIZE_KV: tl.constexpr,
-    attn_mask=None,
 ):
     tl.static_assert(BLOCK_SIZE_KV <= HEAD_DIM)
 
@@ -180,17 +157,6 @@ def causal_flash_attn_fwd(
     for start_kv in range(lo, hi, BLOCK_SIZE_KV):
         start_kv = tl.multiple_of(start_kv, BLOCK_SIZE_KV)
         
-        attn_mask_ptr_left = None
-        if attn_mask is not None:
-            attn_mask_ptr_left = tl.make_block_ptr(
-                base=attn_mask + qvk_offset,
-                shape=(SEQ_LEN, SEQ_LEN),
-                strides=(stride_Q_seq, stride_Q_seq),
-                offsets=(offs_q[0], start_kv),
-                block_shape=(BLOCK_SIZE_Q, BLOCK_SIZE_KV),
-                order=(1, 0),
-            )
-        
         O_block, l_i, m_i = causal_flash_attn_fwd_inner(
             O_block,
             l_i,
@@ -205,7 +171,6 @@ def causal_flash_attn_fwd(
             offs_q,
             offs_kv,
             False,  # non-causal (left of diagonal)
-            attn_mask_ptr=attn_mask_ptr_left,
         )
 
         V_block_ptr_left = tl.advance(V_block_ptr_left, (BLOCK_SIZE_KV, 0))
@@ -218,17 +183,6 @@ def causal_flash_attn_fwd(
     
     K_block_ptr_diag = tl.advance(K_block_ptr, (0, lo))
     V_block_ptr_diag = tl.advance(V_block_ptr, (lo, 0))
-    
-    attn_mask_ptr_diag = None
-    if attn_mask is not None:
-        attn_mask_ptr_diag = tl.make_block_ptr(
-            base=attn_mask + qvk_offset,
-            shape=(SEQ_LEN, SEQ_LEN),
-            strides=(stride_Q_seq, stride_Q_seq),
-            offsets=(offs_q[0], lo),
-            block_shape=(BLOCK_SIZE_Q, BLOCK_SIZE_KV),
-            order=(1, 0),
-        )
     
     O_block, l_i, m_i = causal_flash_attn_fwd_inner(
         O_block,
@@ -244,7 +198,6 @@ def causal_flash_attn_fwd(
         offs_q,
         offs_kv,
         True,  # causal (diagonal block)
-        attn_mask_ptr=attn_mask_ptr_diag,
     )
 
     O_block = O_block / l_i[:, None]
@@ -254,29 +207,21 @@ def causal_flash_attn_fwd(
 class TritonCausalAttention(torch.autograd.Function):
     @staticmethod
     def forward(ctx, Q, K, V, softmax_scale=None, attention_mask=None):
+        # Ensure all inputs are float16
+        Q = Q.to(torch.float16)
+        K = K.to(torch.float16)
+        V = V.to(torch.float16)
+        
+        # If attention_mask is provided, ensure it's float16 for computation
+        if attention_mask is not None and attention_mask.dtype != torch.float16:
+            attention_mask = attention_mask.to(torch.float16)
+        
         BATCH_SIZE, NUM_HEADS, SEQ_LEN, HEAD_DIM = Q.shape
         if softmax_scale is None:
             softmax_scale = 1.0 / (HEAD_DIM ** 0.5)
             
         O = torch.empty_like(Q)
 
-        # Process attention mask if provided
-        # Expected shape: [batch_size, 1, seq_len, seq_len] or [batch_size, 1, 1, seq_len]
-        if attention_mask is not None:
-            # Expand attention mask to match the expected shape
-            if attention_mask.dim() == 4:
-                if attention_mask.shape[1] == 1 and attention_mask.shape[2] == 1:
-                    # Shape [batch_size, 1, 1, seq_len] -> expand to [batch_size, num_heads, seq_len, seq_len]
-                    attention_mask = attention_mask.expand(-1, NUM_HEADS, SEQ_LEN, -1)
-                elif attention_mask.shape[1] == 1:
-                    # Shape [batch_size, 1, seq_len, seq_len] -> expand to [batch_size, num_heads, seq_len, seq_len]
-                    attention_mask = attention_mask.expand(-1, NUM_HEADS, -1, -1)
-            else:
-                raise ValueError(f"Attention mask must be 4D with shape [batch_size, 1, seq_len, seq_len] or [batch_size, 1, 1, seq_len], got {attention_mask.shape}")
-            
-            # Make sure the mask is contiguous for efficient memory access in the kernel
-            attention_mask = attention_mask.contiguous()
-        
         grid = lambda args: (
             triton.cdiv(SEQ_LEN, args["BLOCK_SIZE_Q"]),
             BATCH_SIZE * NUM_HEADS,
@@ -309,7 +254,6 @@ class TritonCausalAttention(torch.autograd.Function):
             NUM_HEADS=Q.shape[1],
             SEQ_LEN=Q.shape[2],
             HEAD_DIM=HEAD_DIM,
-            attn_mask=attention_mask,
         )
 
         return O

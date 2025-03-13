@@ -7,44 +7,42 @@ class FlashAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        
-        # Calculate softmax scale based on hidden_size and num_attention_heads
-        # This follows the standard practice of scaling by 1/sqrt(head_dim)
+
         self.head_dim = config.hidden_size // config.num_attention_heads
         self.softmax_scale = 1.0 / (self.head_dim ** 0.5)
-        
-        # Store dropout probability for potential future use
         self.attention_probs_dropout_prob = config.attention_probs_dropout_prob
 
-    def forward(self, query, key, value, attention_mask=None):
+    def forward(self, hidden_states, attention_mask=None):
         """
-        Flash attention implementation using Triton kernels
+        hidden_states: [bs, seq_len, hidden_state]
+        attention_mask: [bs, 1, 1, seq_len]
+        output: [bs, seq_len, hidden_state]
+        """
+        # Ensure hidden_states is float16 for better performance with flash attention
+        hidden_states = hidden_states.to(torch.float16)
         
-        Args:
-            query: [batch_size, num_heads, seq_len, head_dim]
-            key: [batch_size, num_heads, seq_len, head_dim]
-            value: [batch_size, num_heads, seq_len, head_dim]
-            attention_mask: Optional attention mask [batch_size, 1, 1, seq_len] or [batch_size, 1, seq_len, seq_len]
-                            where 1 indicates tokens to attend to and 0 indicates tokens to ignore
-            
-        Returns:
-            output: [batch_size, num_heads, seq_len, head_dim]
-        """
-        # Process attention mask if provided
+        # First, we have to generate the key, value, query for each token for multi-head attention
+        # using self.transform (more details inside the function).
+        # Size of *_layer is [bs, num_attention_heads, seq_len, attention_head_size].
+        batch_size, seq_len, hidden_size = hidden_states.shape
+        num_heads = self.config.num_attention_heads
+        head_dim = hidden_size // num_heads
+        
+        # Reshape hidden states to prepare for flash attention
+        query = hidden_states.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)
+        key = hidden_states.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)
+        value = hidden_states.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)
+        
+        # Keep attention_mask as is for indexing operations in the model
+        # but create a float16 copy for the flash attention computation if needed
+        attn_mask_for_flash = None
         if attention_mask is not None:
-            # Make sure attention_mask is properly shaped
-            if attention_mask.dim() == 3:
-                # Convert [batch_size, 1, seq_len] to [batch_size, 1, 1, seq_len]
-                attention_mask = attention_mask.unsqueeze(1)
-            
-            # Ensure mask values are binary (0 or 1)
-            if attention_mask.dtype != torch.bool:
-                # Convert to binary mask where 1 means "attend" and 0 means "ignore"
-                attention_mask = attention_mask > 0
-            
-            # Convert to float for the kernel
-            attention_mask = attention_mask.to(dtype=query.dtype)
+            attn_mask_for_flash = attention_mask.to(torch.float16)
         
-        # Pass the query, key, value, softmax_scale, and attention_mask to the kernel
-        # The kernel now properly handles the attention mask
-        return TritonCausalAttention.apply(query, key, value, self.softmax_scale, attention_mask)
+        # Apply flash attention
+        attn_output = TritonCausalAttention.apply(query, key, value, self.softmax_scale, attn_mask_for_flash)
+        
+        # Reshape back to original format
+        attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, hidden_size)
+        
+        return attn_output
