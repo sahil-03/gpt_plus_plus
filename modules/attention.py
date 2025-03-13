@@ -140,7 +140,7 @@ class CausalSelfAttention(nn.Module):
     ### YOUR CODE HERE
 
 
-  def forward(self, hidden_states, attention_mask):
+def forward(self, hidden_states, attention_mask):
     """
     hidden_states: [bs, seq_len, hidden_state]
     attention_mask: [bs, 1, 1, seq_len]
@@ -156,31 +156,31 @@ class CausalSelfAttention(nn.Module):
     # Calculate the multi-head attention.
     attn_value = self.attention(key_layer, query_layer, value_layer, attention_mask)
     return attn_value
-    hidden_states: [bs, seq_len, hidden_state]
-    attention_mask: [bs, 1, 1, seq_len]
-    output: [bs, seq_len, hidden_state]
-    """
-    # First, we have to generate the key, value, query for each token for multi-head attention
-    # using self.transform (more details inside the function).
-    # Size of *_layer is [bs, num_attention_heads, seq_len, attention_head_size].
-    key_layer = self.transform(hidden_states, self.key)
-    value_layer = self.transform(hidden_states, self.value)
-    query_layer = self.transform(hidden_states, self.query)
+    # hidden_states: [bs, seq_len, hidden_state]
+    # attention_mask: [bs, 1, 1, seq_len]
+    # output: [bs, seq_len, hidden_state]
+    # """
+    # # First, we have to generate the key, value, query for each token for multi-head attention
+    # # using self.transform (more details inside the function).
+    # # Size of *_layer is [bs, num_attention_heads, seq_len, attention_head_size].
+    # key_layer = self.transform(hidden_states, self.key)
+    # value_layer = self.transform(hidden_states, self.value)
+    # query_layer = self.transform(hidden_states, self.query)
     
-    # Calculate the multi-head attention.
-    attn_value = self.attention(key_layer, query_layer, value_layer, attention_mask)
-    return attn_value
-    hidden_states: [bs, seq_len, hidden_state]
-    attention_mask: [bs, 1, 1, seq_len]
-    output: [bs, seq_len, hidden_state]
-    """
-    # First, we have to generate the key, value, query for each token for multi-head attention
-    # using self.transform (more details inside the function).
-    # Size of *_layer is [bs, num_attention_heads, seq_len, attention_head_size].
-    key_layer = self.transform(hidden_states, self.key)
-    value_layer = self.transform(hidden_states, self.value)
-    query_layer = self.transform(hidden_states, self.query)
+    # # Calculate the multi-head attention.
+    # attn_value = self.attention(key_layer, query_layer, value_layer, attention_mask)
+    # return attn_value
+    # hidden_states: [bs, seq_len, hidden_state]
+    # attention_mask: [bs, 1, 1, seq_len]
+    # output: [bs, seq_len, hidden_state]
+    # """
+    # # First, we have to generate the key, value, query for each token for multi-head attention
+    # # using self.transform (more details inside the function).
+    # # Size of *_layer is [bs, num_attention_heads, seq_len, attention_head_size].
+    # key_layer = self.transform(hidden_states, self.key)
+    # value_layer = self.transform(hidden_states, self.value)
+    # query_layer = self.transform(hidden_states, self.query)
     
-    # Calculate the multi-head attention.
-    attn_value = self.attention(key_layer, query_layer, value_layer, attention_mask)
-    return attn_value
+    # # Calculate the multi-head attention.
+    # attn_value = self.attention(key_layer, query_layer, value_layer, attention_mask)
+    # return attn_value
