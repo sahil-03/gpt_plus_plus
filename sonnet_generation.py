@@ -42,7 +42,17 @@ def seed_everything(seed=11711):
   torch.cuda.manual_seed_all(seed)
   torch.backends.cudnn.benchmark = False
   torch.backends.cudnn.deterministic = True
-
+  
+def setup_logging(args):
+  log_dir = "logs"
+  if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+  timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+  logging.basicConfig(
+    filename=os.path.join(log_dir, f"training_sonnet_{args.optimizer}_{timestamp}.log"),
+    level=logging.INFO,
+    format='%(asctime)s - %(message)s'
+  )
 
 class SonnetGPT(nn.Module):
   """Your GPT-2 Model designed for paraphrase detection."""
@@ -368,7 +378,8 @@ def add_arguments(args):
 
 if __name__ == "__main__":
   args = get_args()
-  args.filepath = f'{args.epochs}-{args.lr}-sonnet.pt'  # Save path.
+  args.filepath = f'{args.epochs}-{args.lr}-{args.optimizer}-sonnet.pt'  # Save path.
   seed_everything(args.seed)  # Fix the seed for reproducibility.
+  setup_logging(args)
   train(args)
   generate_submission_sonnets(args)

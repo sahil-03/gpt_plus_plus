@@ -89,7 +89,6 @@ output_path = os.path.join(os.getcwd(), 'optimization_comparison.png')
 plt.savefig(output_path, dpi=300)
 print(f"Plot saved to: {output_path}")
 
-# Optional: Show the plot if in an interactive environment
 try:
     plt.show()
 except Exception as e:
