@@ -10,6 +10,9 @@ trains your SonnetGPT model and writes the required submission files.
 import argparse
 import random
 import torch
+import logging
+from datetime import datetime
+import os
 
 import numpy as np
 import torch.nn.functional as F
@@ -234,6 +237,9 @@ def train(args):
 
       train_loss += loss.item()
       num_batches += 1
+      
+      total_batches = epoch * len(train_dataloader) + num_batches
+      logging.info(f"Batch {total_batches}, Loss: {loss.item():.4f}")
 
     train_loss = train_loss / num_batches
     

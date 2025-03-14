@@ -136,6 +136,7 @@ class PreconditionedAdam(Optimizer):
                 precond = (precond_avg / precond_bias_correction + group['eps']).sqrt_()
                 precond.clamp_(min=1/group['max_precond'], max=group['max_precond'])
                 
+                # apply the preconditioner to the gradient
                 grad = grad / precond
                 
                 if group['weight_decay'] != 0:
@@ -143,6 +144,7 @@ class PreconditionedAdam(Optimizer):
                 
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
                 
+                # update momentum term (exp_avg)
                 exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
                 

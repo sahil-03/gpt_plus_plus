@@ -183,7 +183,8 @@ def train(args):
       train_loss += loss.item()
       num_batches += 1
       total_batches = epoch * len(para_train_dataloader) + num_batches
-      logging.info(f"Batch {total_batches}, Loss: {loss.item():.4f}")
+      if total_batches % 500 == 0:
+        logging.info(f"Batch {total_batches}, Loss: {loss.item():.4f}")
 
     train_loss = train_loss / num_batches
 
