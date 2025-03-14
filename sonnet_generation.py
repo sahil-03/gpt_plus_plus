@@ -25,7 +25,7 @@ from datasets import (
 )
 from models.gpt2 import GPT2Model
 
-from optimizer import AdamW
+from optimizer import AdamW, DiagonalPreconditioner, PreconditionedAdam
 
 TQDM_DISABLE = False
 
@@ -186,7 +186,15 @@ def train(args):
   model = model.to(device)
 
   lr = args.lr
-  optimizer = AdamW(model.parameters(), lr=lr)
+  
+  if args.optimizer == 'adam':
+    optimizer = AdamW(model.parameters(), lr=lr)
+  elif args.optimizer == 'preconditioner':
+    optimizer = DiagonalPreconditioner(model.parameters(), lr=lr)
+  elif args.optimizer == 'preconditioned_adam':
+    optimizer = PreconditionedAdam(model.parameters(), lr=lr)
+  else:
+    raise ValueError(f"Unknown optimizer: {args.optimizer}")
   
   # Early stopping parameters
   patience = 3 
@@ -325,6 +333,9 @@ def get_args():
   parser.add_argument("--lr", type=float, help="learning rate", default=1e-5)
   parser.add_argument("--model_size", type=str, help="The model size as specified on hugging face.",
                       choices=['gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'], default='gpt2')
+  parser.add_argument("--optimizer", type=str, default="adam",
+                      choices=['adam', 'preconditioner', 'preconditioned_adam'],
+                      help='Optimizer to use for training')
 
   args = parser.parse_args()
   return args

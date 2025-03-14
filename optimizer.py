@@ -62,6 +62,95 @@ class AdamW(Optimizer):
                 p.data = p.data - alpha_t * state["m_t"] / (state["v_t"]**0.5 + eps)
 
                 if weight_decay != 0:
-                    p.data = p.data - alpha * weight_decay * p.data
+                    p.data = p.data - alpha_t * weight_decay * p.data
                 
         return loss
+
+class DiagonalPreconditioner(Optimizer):
+    def __init__(self, params, lr=1e-3, beta=0.9, eps=1e-8, max_precond=1e4):
+        defaults = dict(lr=lr, beta=beta, eps=eps, max_precond=max_precond)
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    def step(self):
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                    
+                grad = p.grad
+                state = self.state[p]
+                
+                if len(state) == 0:
+                    state['step'] = 0
+                    state['exp_avg_sq'] = torch.zeros_like(p)
+                
+                exp_avg_sq = state['exp_avg_sq']
+                beta = group['beta']
+                
+                state['step'] += 1
+                
+                exp_avg_sq.mul_(beta).addcmul_(grad, grad, value=1 - beta)
+                
+                bias_correction = 1 - beta ** state['step']
+                corrected_exp_avg_sq = exp_avg_sq / bias_correction
+                
+                preconditioner = (corrected_exp_avg_sq + group['eps']).sqrt_()
+                preconditioner.clamp_(min=1/group['max_precond'], max=group['max_precond'])
+                
+                p.addcdiv_(grad, preconditioner, value=-group['lr'])
+
+class PreconditionedAdam(Optimizer):
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
+                 weight_decay=0, precond_beta=0.9, max_precond=1e4):
+        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay,
+                       precond_beta=precond_beta, max_precond=max_precond)
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    def step(self):
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                
+                grad = p.grad
+                state = self.state[p]
+                
+                if len(state) == 0:
+                    state['step'] = 0
+                    state['precond_avg'] = torch.zeros_like(p)
+                    state['exp_avg'] = torch.zeros_like(p)
+                    state['exp_avg_sq'] = torch.zeros_like(p)
+                
+                beta1, beta2 = group['betas']
+                precond_beta = group['precond_beta']
+                
+                state['step'] += 1
+                
+                # Preconditioner update
+                precond_avg = state['precond_avg']
+                precond_avg.mul_(precond_beta).addcmul_(grad, grad, value=1 - precond_beta)
+                
+                precond_bias_correction = 1 - precond_beta ** state['step']
+                precond = (precond_avg / precond_bias_correction + group['eps']).sqrt_()
+                precond.clamp_(min=1/group['max_precond'], max=group['max_precond'])
+                
+                grad = grad / precond
+                
+                if group['weight_decay'] != 0:
+                    grad = grad.add(p, alpha=group['weight_decay'])
+                
+                exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                
+                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+                
+                denom = exp_avg_sq.sqrt().add_(group['eps'])
+                
+                step_size = group['lr']
+                if group['betas'][0] != 1:
+                    step_size = step_size * math.sqrt(1 - beta2 ** state['step'])
+                    step_size = step_size / (1 - beta1 ** state['step'])
+                
+                p.addcdiv_(exp_avg, denom, value=-step_size)
