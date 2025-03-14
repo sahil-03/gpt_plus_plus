@@ -86,10 +86,6 @@ class ParaphraseGPT(nn.Module):
     yes_no = self.paraphrase_detection_head(outputs)
     # no_val, yes_val = yes_no
     # GPT2Model.hidden_state_to_token(yes_no)
-    yes_plural = yes_no[:, 1]
-    nos_plural = yes_no[:, 0]
-
-    mask = yes_plural > nos_plural
     batch_size, _ = yes_no.size()
 
     return_token = torch.empty((batch_size, 8505 + 1), dtype=torch.float)
