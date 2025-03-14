@@ -183,7 +183,7 @@ def train(args):
       train_loss += loss.item()
       num_batches += 1
       total_batches = epoch * len(para_train_dataloader) + num_batches
-      if total_batches % 500 == 0:
+      if total_batches % 50 == 0:
         logging.info(f"Batch {total_batches}, Loss: {loss.item():.4f}")
 
     train_loss = train_loss / num_batches
@@ -201,7 +201,7 @@ def train(args):
 def test(args):
   """Evaluate your model on the dev and test datasets; save the predictions to disk."""
   device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-  saved = torch.load(args.filepath)
+  saved = torch.load(args.filepath, weights_only=False)
 
   model = ParaphraseGPT(saved['args'])
   model.load_state_dict(saved['model'])
@@ -256,6 +256,8 @@ def get_args():
   parser.add_argument("--optimizer", type=str, default="adam",
                       choices=['adam', 'preconditioner', 'preconditioned_adam'],
                       help='Optimizer to use for training')
+  
+  parser.add_argument("--no_train", action='store_true')
 
   args = parser.parse_args()
   return args
@@ -282,7 +284,8 @@ def add_arguments(args):
 
 if __name__ == "__main__":
   args = get_args()
-  args.filepath = f'{args.epochs}-{args.lr}-paraphrase.pt'  # Save path.
+  args.filepath = f'{args.epochs}-{args.lr}-{args.optimizer}-paraphrase.pt'  # Save path.
   seed_everything(args.seed)  # Fix the seed for reproducibility.
-  train(args)
+  if not args.no_train:
+    train(args)
   test(args)

@@ -8,6 +8,7 @@ model_test_paraphrase is suitable for the test dataloader where label informatio
 """
 
 import torch
+import argparse
 from sklearn.metrics import f1_score, accuracy_score
 from tqdm import tqdm
 import numpy as np
@@ -78,3 +79,16 @@ def test_sonnet(
     # compute chrf
     chrf_score = chrf.corpus_score(generated_sonnets, [true_sonnets])
     return float(chrf_score.score)
+  
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--generated_sonnets', type=str, default='predictions/generated_sonnets.txt',
+                      help='Path to file containing generated sonnets')
+    args = parser.parse_args()
+    
+    chrf_score = test_sonnet(test_path=args.generated_sonnets)
+    print(f"CHRF Score: {chrf_score:.4f}")
+
+if __name__ == '__main__':
+    main()
