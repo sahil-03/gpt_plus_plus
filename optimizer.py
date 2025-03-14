@@ -62,7 +62,7 @@ class AdamW(Optimizer):
                 p.data = p.data - alpha_t * state["m_t"] / (state["v_t"]**0.5 + eps)
 
                 if weight_decay != 0:
-                    p.data = p.data - alpha * weight_decay * p.data
+                    p.data = p.data - alpha_t * weight_decay * p.data
                 
         return loss
 

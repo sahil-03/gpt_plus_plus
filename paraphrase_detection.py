@@ -14,6 +14,9 @@ trains and evaluates your ParaphraseGPT model and writes the required submission
 import argparse
 import random
 import torch
+import logging
+from datetime import datetime
+import os
 
 import numpy as np
 import torch.nn.functional as F
@@ -30,7 +33,7 @@ from datasets import (
 from evaluation import model_eval_paraphrase, model_test_paraphrase
 from models.gpt2 import GPT2Model
 
-from optimizer import AdamW
+from optimizer import AdamW, DiagonalPreconditioner, PreconditionedAdam
 
 TQDM_DISABLE = False
 
@@ -94,7 +97,8 @@ class ParaphraseGPT(nn.Module):
     return_token[:, 3919] = yes_no[:, 0]
     return_token[:, 8505] = yes_no[:, 1]
 
-    return_token = return_token.to(torch.device('cuda'))
+    device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+    return_token = return_token.to(device)
     return return_token
 
 
@@ -115,6 +119,17 @@ def save_model(model, optimizer, args, filepath):
 
 def train(args):
   """Train GPT-2 for paraphrase detection on the Quora dataset."""
+  # Set up logging
+  log_dir = "logs"
+  if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+  timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+  logging.basicConfig(
+    filename=os.path.join(log_dir, f"training_{args.optimizer}_{timestamp}.log"),
+    level=logging.INFO,
+    format='%(asctime)s - %(message)s'
+  )
+  
   device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
   # Create the data and its corresponding datasets and dataloader.
   para_train_data = load_paraphrase_data(args.para_train)
@@ -133,7 +148,16 @@ def train(args):
   model = model.to(device)
 
   lr = args.lr
-  optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.)
+  
+  if args.optimizer == 'adam':
+    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.)
+  elif args.optimizer == 'preconditioner':
+    optimizer = DiagonalPreconditioner(model.parameters(), lr=lr)
+  elif args.optimizer == 'preconditioned_adam':
+    optimizer = PreconditionedAdam(model.parameters(), lr=lr)
+  else:
+    raise ValueError(f"Unknown optimizer: {args.optimizer}")
+  
   best_dev_acc = 0
 
   # Run for the specified number of epochs.
@@ -158,6 +182,8 @@ def train(args):
 
       train_loss += loss.item()
       num_batches += 1
+      total_batches = epoch * len(para_train_dataloader) + num_batches
+      logging.info(f"Batch {total_batches}, Loss: {loss.item():.4f}")
 
     train_loss = train_loss / num_batches
 
@@ -226,6 +252,9 @@ def get_args():
   parser.add_argument("--model_size", type=str,
                       help="The model size as specified on hugging face. DO NOT use the xl model.",
                       choices=['gpt2', 'gpt2-medium', 'gpt2-large'], default='gpt2')
+  parser.add_argument("--optimizer", type=str, default="adam",
+                      choices=['adam', 'preconditioner', 'preconditioned_adam'],
+                      help='Optimizer to use for training')
 
   args = parser.parse_args()
   return args
